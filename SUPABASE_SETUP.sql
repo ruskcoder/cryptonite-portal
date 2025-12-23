@@ -1,0 +1,180 @@
+-- ============================================
+-- 1. PROFILES TABLE
+-- ============================================
+create table public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  role text default 'user', 
+  approval_status text default 'denied',
+  email text unique,
+  full_name text,
+  phone_number text,
+  katy_number text unique,
+  grade int2,
+  parent_email text,
+  parent_phone text,
+  address text
+);
+
+alter table public.profiles enable row level security;
+
+-- ============================================
+-- 2. ADMIN CHECK FUNCTION
+-- Fixed potential naming collision by using alias
+-- ============================================
+create or replace function is_admin(p_user_id uuid)
+returns boolean as $$
+begin
+  return exists (
+    select 1 from public.profiles
+    where id = p_user_id and role = 'admin'
+  );
+end;
+$$ language plpgsql security definer;
+
+-- ============================================
+-- 3. EVENT HOUR TYPES TABLE
+-- ============================================
+create table public.event_hour_types (
+  id uuid primary key default gen_random_uuid(),
+  event_name text unique not null,
+  hour_type text check (hour_type in ('PR', 'Build')) not null,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.event_hour_types enable row level security;
+
+create policy "Anyone can read event hour types" on public.event_hour_types for select using (true);
+create policy "Admins can insert event hour types" on public.event_hour_types for insert with check (is_admin(auth.uid()));
+create policy "Admins can update event hour types" on public.event_hour_types for update using (is_admin(auth.uid()));
+create policy "Admins can delete event hour types" on public.event_hour_types for delete using (is_admin(auth.uid()));
+
+-- ============================================
+-- 4. AUTO CREATE PROFILE TRIGGER
+-- ============================================
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, email)
+  values (new.id, new.email);
+  return new;
+end;
+$$ language plpgsql security definer;
+
+-- Drop if exists to prevent errors on re-run
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+after insert on auth.users
+for each row
+execute procedure public.handle_new_user();
+
+-- ============================================
+-- 5. ATTENDANCE TABLE
+-- ============================================
+create table public.attendance (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade not null,
+  action text check (action in ('clock_in', 'clock_out')) not null,
+  hour_type text check (hour_type in ('PR', 'Build')),
+  time timestamptz default now() not null
+);
+
+alter table public.attendance enable row level security;
+
+-- ============================================
+-- 6. FIXED CLOCK IN/OUT FUNCTION
+-- Fixed "ambiguous id" by using table aliases and explicit parameter names
+-- ============================================
+create or replace function public.clock_in_out(p_user_id uuid, p_action text)
+returns table(
+  id uuid,
+  user_id uuid,
+  action text,
+  hour_type text,
+  "time" timestamptz
+) as $$
+declare
+  v_approval_status text;
+begin
+  -- 1. Validate action
+  if p_action not in ('clock_in', 'clock_out') then
+    raise exception 'Invalid action. Must be clock_in or clock_out';
+  end if;
+
+  -- 2. Check if user is approved
+  select p.approval_status into v_approval_status
+  from public.profiles p
+  where p.id = p_user_id;
+
+  if v_approval_status = 'denied' or v_approval_status is null then
+    raise exception 'User is not approved to clock in or out';
+  end if;
+
+  -- 3. Insert and return
+  return query
+  insert into public.attendance (user_id, action, hour_type, time)
+  values (p_user_id, p_action, null, now())
+  returning attendance.id, attendance.user_id, attendance.action, attendance.hour_type, attendance.time;
+end;
+$$ language plpgsql security definer;
+
+grant execute on function public.clock_in_out(uuid, text) to authenticated;
+
+-- ============================================
+-- 7. POLICIES
+-- ============================================
+
+-- Attendance Policies
+create policy "Users can view own attendance" on public.attendance for select using (auth.uid() = user_id);
+-- IMPORTANT: This allows the RPC function to perform the insert under the user's session
+create policy "Users can insert own attendance" on public.attendance for insert with check (auth.uid() = user_id);
+
+-- Profile Policies
+create policy "Users can view own profile" on public.profiles for select using (auth.uid() = id);
+create policy "Users can update own profile" on public.profiles for update using (auth.uid() = id);
+
+-- Admin Policies (Consolidated)
+create policy "Admins manage all profiles" on public.profiles for all using (is_admin(auth.uid()));
+create policy "Admins manage all attendance" on public.attendance for all using (is_admin(auth.uid()));
+
+-- ============================================
+-- 8. FIXED GET USER INFO
+-- Fixed naming collision
+-- ============================================
+create or replace function public.get_user_info(p_user_id uuid)
+returns table(display_name text) as $$
+begin
+  return query
+  select COALESCE(p.full_name, p.email)
+  from public.profiles p
+  where p.id = p_user_id
+  limit 1;
+end;
+$$ language plpgsql security definer;
+
+grant execute on function public.get_user_info(uuid) to authenticated;
+
+-- ============================================
+-- 9. DELETE USER FUNCTION
+-- Only admins can delete users
+-- ============================================
+create or replace function public.delete_user(p_user_id uuid)
+returns json as $$
+declare
+  v_result json;
+begin
+  -- Check if caller is admin
+  if not is_admin(auth.uid()) then
+    raise exception 'Only admins can delete users';
+  end if;
+
+  -- Delete the user from auth.users (cascade will delete profile)
+  delete from auth.users where id = p_user_id;
+
+  return json_build_object('success', true, 'message', 'User deleted successfully');
+exception when others then
+  return json_build_object('success', false, 'message', SQLERRM);
+end;
+$$ language plpgsql security definer;
+
+grant execute on function public.delete_user(uuid) to authenticated;
