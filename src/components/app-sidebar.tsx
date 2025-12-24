@@ -4,7 +4,6 @@ import * as React from "react"
 import {
   LayoutDashboard,
   MessageSquare,
-  Clock,
   Trophy,
   Users,
   Book as LogBook,
@@ -19,9 +18,7 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroupLabel,
   SidebarHeader,
-  SidebarRail,
 } from "@/components/ui/sidebar"
 import { useUserProfileStore } from "../store/userProfileStore"
 import Logo from "@/assets/img/logo-circle.png"
@@ -104,16 +101,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   }
 
   // Add onClick handler to Desktop Mode item
-  const adminNavDataWithHandlers = isAdmin
-    ? {
-        ...adminNavData,
-        adminSection: adminNavData.adminSection.map((item) =>
-          item.title === 'Desktop Mode'
-            ? { ...item, onClick: handleDesktopModeClick }
-            : item
-        ),
-      }
-    : adminNavData
+  const adminNavDataWithHandlers = {
+    ...adminNavData,
+    adminSection: adminNavData.adminSection.map((item) =>
+      item.title === 'Desktop Mode'
+        ? { ...item, onClick: handleDesktopModeClick }
+        : item
+    ),
+  }
 
   const navData = isAdmin ? adminNavDataWithHandlers : userNavData
 
@@ -133,8 +128,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <div>
           <NavMain items={navData.navMain} />
         </div>
-        {isAdmin && navData.adminSection && (
-          <NavAdmin items={navData.adminSection} />
+        {isAdmin && 'adminSection' in navData && (
+          <NavAdmin items={(navData as typeof adminNavDataWithHandlers).adminSection} />
         )}
       </SidebarContent>
       <SidebarFooter>

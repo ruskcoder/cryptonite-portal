@@ -80,13 +80,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Check auth state on mount
   useEffect(() => {
     let isMounted = true
-    let timeoutId: NodeJS.Timeout
+    let timeoutId: ReturnType<typeof setTimeout>
 
     const checkAuth = async () => {
       try {
         console.log('Starting auth check...')
-        console.log('Supabase URL:', supabase.supabaseUrl)
-        console.log('Supabase Auth:', supabase.auth)
 
         // Set a timeout to prevent hanging forever
         timeoutId = setTimeout(() => {
@@ -98,8 +96,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }, 5000)
 
-        // Check if client is initialized
-        if (!supabase.supabaseUrl || !supabase.auth) {
+        // Check if auth is initialized
+        if (!supabase.auth) {
           throw new Error('Supabase client not properly initialized')
         }
 
@@ -120,7 +118,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (session) {
           console.log('Auth session found:', session.user.email)
-          setUser({ id: session.user.id, email: session.user.email })
+          const email = session.user.email || ''
+          setUser({ id: session.user.id, email })
           setIsAuthenticated(true)
           await fetchUserProfile()
         } else {

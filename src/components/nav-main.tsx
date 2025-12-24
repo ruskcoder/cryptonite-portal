@@ -3,7 +3,6 @@ import { useLocation, Link } from "react-router-dom"
 
 import {
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,

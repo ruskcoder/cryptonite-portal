@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { GOOGLE_SCRIPT_API } from '../lib/constants'
 import {
   Table,
   TableBody,
@@ -16,12 +15,6 @@ interface AttendanceRecord {
   action: 'clock_in' | 'clock_out'
   hour_type: 'PR' | 'Build' | null
   time: string
-}
-
-interface GoogleEvent {
-  summary: string
-  start: string
-  end: string
 }
 
 interface UserHours {
@@ -49,24 +42,12 @@ export function Leaderboard() {
         setLoading(true)
         setError(null)
 
-        // Fetch all events from Google Apps Script
-        const eventsResponse = await fetch(`${GOOGLE_SCRIPT_API}?all=true`)
-        const eventsData = (await eventsResponse.json()) as { events: GoogleEvent[] }
-        const allEvents = eventsData.events || []
-
         // Fetch all event_hour_types mappings
         const { data: eventHourTypesData, error: eventHourTypesError } = await supabase
           .from('event_hour_types')
           .select('*')
 
         if (eventHourTypesError) throw eventHourTypesError
-
-        const eventHourTypeMap = new Map<string, 'PR' | 'Build'>(
-          (eventHourTypesData || []).map((e: { event_name: string; hour_type: 'PR' | 'Build' }) => [
-            e.event_name.toLowerCase().trim(),
-            e.hour_type,
-          ])
-        )
 
         // Fetch all attendance records
         const { data: attendanceData, error: attendanceError } = await supabase
@@ -98,42 +79,6 @@ export function Leaderboard() {
               userNameMap.set(userId, fullName)
             }
           }
-        }
-
-        // Helper function to find event at a specific time
-        const findEventAtTime = (timestamp: string): GoogleEvent | null => {
-          const time = new Date(timestamp).getTime()
-          return allEvents.find((event) => {
-            const start = new Date(event.start).getTime()
-            const end = new Date(event.end).getTime()
-            return time >= start && time < end
-          }) || null
-        }
-
-        // Helper function to get hour type for a record
-        const getHourTypeForRecord = (record: AttendanceRecord): 'PR' | 'Build' => {
-          // If hour_type is already set, use it
-          if (record.hour_type) {
-            return record.hour_type
-          }
-
-          // If not set, find the event and look up its hour type
-          const event = findEventAtTime(record.time)
-          if (event) {
-            const eventNameLower = event.summary.toLowerCase().trim()
-            const mappedType = eventHourTypeMap.get(eventNameLower)
-            console.log(
-              `Event "${event.summary}" (${eventNameLower}) at ${record.time} -> ${mappedType || 'not found in map'}`
-            )
-            if (mappedType) {
-              return mappedType
-            }
-          } else {
-            console.log(`No event found at ${record.time}. Available events:`, allEvents.slice(0, 5))
-          }
-
-          // Default to Build if not found
-          return 'Build'
         }
 
         // Calculate hours for each user
