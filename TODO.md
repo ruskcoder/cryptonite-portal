@@ -1,0 +1,1 @@
+- Add checks that user can only clock in/out when they are in the opposite state

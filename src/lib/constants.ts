@@ -8,7 +8,7 @@ export const ALLOWED_LOCATIONS = [
     address: '1730 Katyland Dr, Katy, TX 77493',
     lat: 29.796067947796566,
     lng: -95.81033897344692,
-    radius: 500, 
+    radius: 50000, 
   },
 ]
 
