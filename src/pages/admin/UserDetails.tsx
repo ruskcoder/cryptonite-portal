@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
-import { clockIn, clockOut, isUserClockedIn } from '@/lib/attendance'
+import { isUserClockedIn } from '@/lib/attendance'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -305,7 +305,18 @@ export function UserDetails() {
 
       if (err) throw err
 
-      setUsers(users.map((u) => (u.id === user.id ? { ...u, ...user } : u)))
+      // Only update the specific fields that were saved, preserving isClockedIn from current state
+      setUsers(users.map((u) => (u.id === user.id ? {
+        ...u,
+        full_name: user.full_name,
+        phone_number: user.phone_number,
+        katy_number: user.katy_number,
+        grade: user.grade,
+        parent_email: user.parent_email,
+        parent_phone: user.parent_phone,
+        address: user.address,
+        role: user.role,
+      } : u)))
       toast.success('User saved successfully')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save user')
@@ -361,7 +372,14 @@ export function UserDetails() {
       if (!user) return
 
       if (user.isClockedIn) {
-        await clockOut(userId)
+        const { error: clockOutError } = await supabase.rpc('clock_in_out', {
+          p_user_id: userId,
+          p_action: 'clock_out',
+        })
+        
+        if (clockOutError) {
+          throw new Error(clockOutError.message || 'Failed to clock out')
+        }
       } else {
         const customTime = clockInTimes[userId]
         
@@ -373,8 +391,7 @@ export function UserDetails() {
           
           // Check if time is in the future
           if (clockTime > new Date()) {
-            toast.error('Cannot clock in with a future time')
-            return
+            throw new Error('Cannot clock in with a future time')
           }
           
           // Insert directly to attendance table with custom time
@@ -391,22 +408,38 @@ export function UserDetails() {
           setClockInTimes({ ...clockInTimes, [userId]: '' })
         } else {
           // Use server time via RPC function
-          await clockIn(userId)
+          const { error: clockInError } = await supabase.rpc('clock_in_out', {
+            p_user_id: userId,
+            p_action: 'clock_in',
+          })
+          
+          if (clockInError) {
+            throw new Error(clockInError.message || 'Failed to clock in')
+          }
         }
       }
 
       // Refresh clock in status
       const isClockedIn = await isUserClockedIn(userId)
       setUsers(users.map((u) => (u.id === userId ? { ...u, isClockedIn } : u)))
+      toast.success(user.isClockedIn ? 'User clocked out successfully' : 'User clocked in successfully')
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update attendance')
+      const errorMessage = err instanceof Error ? err.message : 'Failed to update attendance'
+      toast.error(errorMessage)
     }
   }
 
   const handleBulkClockOut = async () => {
     try {
       for (const userId of selectedUsers) {
-        await clockOut(userId)
+        const { error: clockOutError } = await supabase.rpc('clock_in_out', {
+          p_user_id: userId,
+          p_action: 'clock_out',
+        })
+        
+        if (clockOutError) {
+          throw new Error(clockOutError.message || `Failed to clock out user`)
+        }
       }
 
       // Refresh all users
@@ -414,7 +447,8 @@ export function UserDetails() {
       setSelectedUsers(new Set())
       toast.success('Selected users clocked out successfully')
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to clock out users')
+      const errorMessage = err instanceof Error ? err.message : 'Failed to clock out users'
+      toast.error(errorMessage)
     }
   }
 

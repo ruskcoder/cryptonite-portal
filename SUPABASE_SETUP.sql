@@ -178,3 +178,92 @@ end;
 $$ language plpgsql security definer;
 
 grant execute on function public.delete_user(uuid) to authenticated;
+
+-- ============================================
+-- 10. VALIDATE CLOCK IN/OUT STATE
+-- Prevent users from clocking in if already clocked in,
+-- and prevent clocking out if already clocked out
+-- ============================================
+create or replace function public.validate_attendance_state(p_user_id uuid, p_action text)
+returns table(is_valid boolean, message text) as $$
+declare
+  v_last_action text;
+begin
+  -- Get the most recent attendance action
+  select action into v_last_action
+  from public.attendance
+  where user_id = p_user_id
+  order by time desc
+  limit 1;
+
+  -- If no previous record, action is always valid
+  if v_last_action is null then
+    return query select true, 'Valid action'::text;
+    return;
+  end if;
+
+  -- Check if trying to clock in while already clocked in
+  if p_action = 'clock_in' and v_last_action = 'clock_in' then
+    return query select false, 'Already clocked in. Please clock out first.'::text;
+    return;
+  end if;
+
+  -- Check if trying to clock out while already clocked out
+  if p_action = 'clock_out' and v_last_action = 'clock_out' then
+    return query select false, 'Already clocked out. Please clock in first.'::text;
+    return;
+  end if;
+
+  -- Action is valid
+  return query select true, 'Valid action'::text;
+end;
+$$ language plpgsql security definer;
+
+grant execute on function public.validate_attendance_state(uuid, text) to authenticated;
+
+-- ============================================
+-- 11. UPDATE CLOCK IN/OUT FUNCTION
+-- Now includes state validation
+-- ============================================
+create or replace function public.clock_in_out(p_user_id uuid, p_action text)
+returns table(
+  id uuid,
+  user_id uuid,
+  action text,
+  hour_type text,
+  "time" timestamptz
+) as $$
+declare
+  v_approval_status text;
+  v_is_valid boolean;
+  v_message text;
+begin
+  -- 1. Validate action format
+  if p_action not in ('clock_in', 'clock_out') then
+    raise exception 'Invalid action. Must be clock_in or clock_out';
+  end if;
+
+  -- 2. Check if user is approved
+  select p.approval_status into v_approval_status
+  from public.profiles p
+  where p.id = p_user_id;
+
+  if v_approval_status = 'denied' or v_approval_status is null then
+    raise exception 'User is not approved to clock in or out';
+  end if;
+
+  -- 3. Validate current state
+  select is_valid, message into v_is_valid, v_message
+  from public.validate_attendance_state(p_user_id, p_action);
+
+  if not v_is_valid then
+    raise exception '%', v_message;
+  end if;
+
+  -- 4. Insert and return
+  return query
+  insert into public.attendance (user_id, action, hour_type, time)
+  values (p_user_id, p_action, null, now())
+  returning attendance.id, attendance.user_id, attendance.action, attendance.hour_type, attendance.time;
+end;
+$$ language plpgsql security definer;

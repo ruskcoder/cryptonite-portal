@@ -1,1 +1,4 @@
-- Add checks that user can only clock in/out when they are in the opposite state
+- Multiple sign in modes for trainings
+- vercel job to automatically clock out when event ends
+- filter by day to see attendance per day
+- filters on hours log

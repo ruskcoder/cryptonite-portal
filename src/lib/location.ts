@@ -1,9 +1,23 @@
-import { ALLOWED_LOCATIONS } from './constants'
+import { ALLOWED_LOCATIONS, SHAW_CENTER_IP } from './constants'
 
 export interface UserLocation {
   lat: number
   lng: number
   accuracy: number
+}
+
+/**
+ * Get user's current IP address
+ */
+export const getUserIp = async (): Promise<string | null> => {
+  try {
+    const response = await fetch('https://api.ipify.org?format=json')
+    const data = await response.json()
+    return data.ip || null
+  } catch (error) {
+    console.error('Failed to get IP:', error)
+    return null
+  }
 }
 
 /**
@@ -67,6 +81,8 @@ export const getUserLocation = async (): Promise<UserLocation> => {
 
 /**
  * Check if user is within an allowed location
+ * First checks IP address, if it matches allowed IP, no geolocation needed
+ * Otherwise requires geolocation within allowed radius
  */
 export const isUserInAllowedLocation = async (): Promise<{
   isAllowed: boolean
@@ -76,6 +92,19 @@ export const isUserInAllowedLocation = async (): Promise<{
   message: string
 }> => {
   try {
+    // First, check if user's IP matches the allowed IP
+    const userIp = await getUserIp()
+    if (userIp === SHAW_CENTER_IP) {
+      return {
+        isAllowed: true,
+        location: null,
+        nearestLocation: ALLOWED_LOCATIONS[0],
+        distance: 0,
+        message: `You are at ${ALLOWED_LOCATIONS[0].address} (verified by IP)`,
+      }
+    }
+
+    // If IP doesn't match, fall back to geolocation
     const userLoc = await getUserLocation()
 
     let nearestLocation = null

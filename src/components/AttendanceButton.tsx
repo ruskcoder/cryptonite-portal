@@ -4,7 +4,7 @@ import { Button } from './ui/button'
 import { getEventStatus, isUserClockedIn, clockIn, clockOut } from '../lib/attendance'
 import { isUserInAllowedLocation } from '../lib/location'
 import { supabase } from '../lib/supabase'
-import type { EventStatus } from '../lib/attendance'
+import type { EventStatus, Event } from '../lib/attendance'
 
 export function AttendanceButton() {
   const { user } = useAuth()
@@ -15,7 +15,9 @@ export function AttendanceButton() {
   const [locationLoading, setLocationLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [locationMessage, setLocationMessage] = useState<string | null>(null)
-  const [allowedEventNames, setAllowedEventNames] = useState<Set<string>>(new Set())
+  const [matchedEvent, setMatchedEvent] = useState<{ name: string; event: Event } | null>(null)
+  const [lastClockInTime, setLastClockInTime] = useState<Date | null>(null)
+  const [elapsedTime, setElapsedTime] = useState<{ hours: number; minutes: number }>({ hours: 0, minutes: 0 })
   const isInitialMount = useRef(true)
 
   // Fetch event status and attendance status on mount
@@ -32,23 +34,54 @@ export function AttendanceButton() {
           .from('event_hour_types')
           .select('event_name')
 
+        let eventNames = new Set<string>()
         if (eventTypesData) {
-          const eventNames = new Set(
+          eventNames = new Set(
             eventTypesData.map((e: { event_name: string }) => 
               e.event_name.toLowerCase().trim()
             )
           )
-          setAllowedEventNames(eventNames)
         }
 
         // Fetch event status
-        const event = await getEventStatus()
-        setEventStatus(event)
+        const eventStatusData = await getEventStatus()
+        setEventStatus(eventStatusData)
+
+        // Check if any event in the array matches allowed event names
+        let matched: { name: string; event: Event } | null = null
+        if (eventStatusData.inEvent) {
+          const eventsArray = eventStatusData.events || []
+          for (const evt of eventsArray) {
+            const eventName = evt.summary?.toLowerCase().trim() ?? ''
+            if (eventNames.has(eventName)) {
+              matched = { name: evt.summary, event: evt }
+              break
+            }
+          }
+        }
+        setMatchedEvent(matched)
 
         // Fetch user's attendance status if user exists
         if (user?.id) {
           const clockedIn = await isUserClockedIn(user.id)
           setIsClockedIn(clockedIn)
+
+          // If clocked in, fetch the last clock in time
+          if (clockedIn) {
+            const { data: lastRecord } = await supabase
+              .from('attendance')
+              .select('time')
+              .eq('user_id', user.id)
+              .order('time', { ascending: false })
+              .limit(1)
+              .single()
+
+            if (lastRecord) {
+              setLastClockInTime(new Date(lastRecord.time))
+            }
+          } else {
+            setLastClockInTime(null)
+          }
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to fetch status'
@@ -68,8 +101,28 @@ export function AttendanceButton() {
     return () => clearInterval(interval)
   }, [user?.id])
 
+  // Update elapsed time every second when clocked in
+  useEffect(() => {
+    if (!isClockedIn || !lastClockInTime) {
+      setElapsedTime({ hours: 0, minutes: 0 })
+      return
+    }
+
+    const updateElapsedTime = () => {
+      const now = new Date()
+      const diffMs = now.getTime() - lastClockInTime.getTime()
+      const hours = Math.floor(diffMs / (1000 * 60 * 60))
+      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+      setElapsedTime({ hours, minutes })
+    }
+
+    updateElapsedTime()
+    const interval = setInterval(updateElapsedTime, 1000)
+    return () => clearInterval(interval)
+  }, [isClockedIn, lastClockInTime])
+
   const handleClockInOut = async () => {
-    if (!user?.id || !isEventValid || !eventStatus?.event) return
+    if (!user?.id || !matchedEvent) return
 
     try {
       setActionLoading(true)
@@ -92,9 +145,11 @@ export function AttendanceButton() {
       if (isClockedIn) {
         await clockOut(user.id)
         setIsClockedIn(false)
+        setLastClockInTime(null)
       } else {
         await clockIn(user.id)
         setIsClockedIn(true)
+        setLastClockInTime(new Date())
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update attendance'
@@ -106,11 +161,9 @@ export function AttendanceButton() {
     }
   }
 
-  // Check if event is active and has an allowed title
+  // Check if event is active and has a matched allowed event
   const isEventActive = eventStatus?.inEvent ?? false
-  const eventTitle = eventStatus?.event?.summary?.trim() ?? ''
-  const isEventTypeAllowed = allowedEventNames.has(eventTitle.toLowerCase())
-  const isEventValid = isEventActive && isEventTypeAllowed
+  const isEventValid = isEventActive && matchedEvent !== null
 
   if (loading) {
     return (
@@ -132,11 +185,19 @@ export function AttendanceButton() {
         {actionLoading || locationLoading ? 'Processing...' : (isClockedIn ? 'Clock Out' : 'Clock In')}
       </Button>
 
+      {isClockedIn && (
+        <div className="rounded-lg border border-green-600 bg-green-50 dark:bg-green-950 p-3">
+          <p className="text-sm font-semibold text-green-700 dark:text-green-300">
+            Signed In For: {elapsedTime.hours}h {elapsedTime.minutes}m
+          </p>
+        </div>
+      )}
+
       {!isEventActive && (
         <p className="text-sm text-destructive text-center">Event is inactive</p>
       )}
 
-      {isEventActive && !isEventTypeAllowed && (
+      {isEventActive && !matchedEvent && (
         <p className="text-sm text-destructive text-center">
           Clock in/out not available for this event
         </p>
@@ -158,6 +219,16 @@ export function AttendanceButton() {
           <p>
             {new Date(eventStatus.event.start).toLocaleDateString()} -{' '}
             {new Date(eventStatus.event.end).toLocaleDateString()}
+          </p>
+        </div>
+      )}
+
+      {matchedEvent && (
+        <div className="text-xs text-muted-foreground space-y-1">
+          <p className="font-semibold">{matchedEvent.name}</p>
+          <p>
+            {new Date(matchedEvent.event.start).toLocaleDateString()} -{' '}
+            {new Date(matchedEvent.event.end).toLocaleDateString()}
           </p>
         </div>
       )}

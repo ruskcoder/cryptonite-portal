@@ -9,7 +9,8 @@ export interface Event {
 
 export interface EventStatus {
   inEvent: boolean
-  event: Event | null
+  event?: Event | null
+  events?: Event[]
 }
 
 export interface AttendanceRecord {

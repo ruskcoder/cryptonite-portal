@@ -97,12 +97,12 @@ export function DesktopMode() {
     return () => clearInterval(interval)
   }, [])
 
-  // Refresh attendance whenever users change
+  // Refresh attendance whenever users or active event change
   useEffect(() => {
     if (users.length > 0) {
       refreshAttendance()
     }
-  }, [users])
+  }, [users, activeEvent])
 
   const refreshAttendance = async () => {
     try {
@@ -114,10 +114,28 @@ export function DesktopMode() {
 
       if (error) throw error
 
+      // Get all current events' time ranges
+      const eventTimeRanges: Array<{ start: Date; end: Date }> = []
+      if (activeEvent?.inEvent && activeEvent?.events) {
+        for (const event of activeEvent.events) {
+          eventTimeRanges.push({
+            start: new Date(event.start),
+            end: new Date(event.end),
+          })
+        }
+      }
+
+      // Helper function to check if a time falls within any event range
+      const isTimeWithinAnyEvent = (time: Date): boolean => {
+        return eventTimeRanges.some(range => time >= range.start && time <= range.end)
+      }
+
       // Process attendance to build sessions per user
       const userSessions = new Map<string, Array<{ clockInTime: Date; clockOutTime?: Date }>>()
 
       for (const record of attendanceData || []) {
+        const recordTime = new Date(record.time)
+
         const userId = record.user_id
 
         if (!userSessions.has(userId)) {
@@ -127,8 +145,10 @@ export function DesktopMode() {
         const sessions = userSessions.get(userId)!
 
         if (record.action === 'clock_in') {
-          // Start a new session
-          sessions.push({ clockInTime: new Date(record.time) })
+          // Only include clock_in if it's within an active event's time range
+          if (isTimeWithinAnyEvent(recordTime)) {
+            sessions.push({ clockInTime: new Date(record.time) })
+          }
         } else if (record.action === 'clock_out' && sessions.length > 0) {
           // Close the last session
           sessions[sessions.length - 1].clockOutTime = new Date(record.time)
@@ -240,7 +260,9 @@ export function DesktopMode() {
           p_action: 'clock_in',
         })
 
-        if (clockError) throw clockError
+        if (clockError) {
+          throw new Error(clockError.message || 'Failed to clock in user')
+        }
       }
 
       toast.success('User clocked in successfully')
@@ -261,12 +283,15 @@ export function DesktopMode() {
         p_action: 'clock_out',
       })
 
-      if (error) throw error
+      if (error) {
+        throw new Error(error.message || 'Failed to clock out user')
+      }
 
       toast.success('User clocked out successfully')
       await refreshAttendance()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to clock out user')
+      const errorMessage = err instanceof Error ? err.message : 'Failed to clock out user'
+      toast.error(errorMessage)
     }
   }
 
