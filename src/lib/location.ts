@@ -1,4 +1,4 @@
-import { ALLOWED_LOCATIONS, SHAW_CENTER_IP } from './constants'
+import { ALLOWED_LOCATIONS, SHAW_CENTER_IPS } from './constants'
 
 export interface UserLocation {
   lat: number
@@ -92,9 +92,9 @@ export const isUserInAllowedLocation = async (): Promise<{
   message: string
 }> => {
   try {
-    // First, check if user's IP matches the allowed IP
+    // First, check if user's IP matches any of the allowed IPs
     const userIp = await getUserIp()
-    if (userIp === SHAW_CENTER_IP) {
+    if (userIp && SHAW_CENTER_IPS.includes(userIp)) {
       return {
         isAllowed: true,
         location: null,
