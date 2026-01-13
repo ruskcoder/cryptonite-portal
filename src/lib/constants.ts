@@ -11,4 +11,4 @@ export const ALLOWED_LOCATIONS = [
     radius: 200, 
   },
 ]
-export const SHAW_CENTER_IPS = ['192.12.146.181', '192.12.146.182']
+export const SHAW_CENTER_IPS = ['192.12.146.181', '192.12.146.182', '192.12.146.180']
