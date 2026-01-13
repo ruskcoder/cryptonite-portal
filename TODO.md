@@ -1,4 +1,5 @@
 - Multiple sign in modes for trainings
 - vercel job to automatically clock out when event ends
 - filter by day to see attendance per day
-- filters on hours log
+- filters on hours log & delete row
+- add user sessions (automatically check user start and end times and group into sessions)
